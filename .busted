@@ -1,0 +1,8 @@
+return {
+    default = {
+        ROOT = { "spec" },
+        lpath = "./?.lua",
+        output = "plainTerminal",
+        verbose = true,
+    }
+}
