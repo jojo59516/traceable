@@ -268,28 +268,30 @@ describe("basic tests -", function()
             end)
         end
 
-        local map = {
-            { create_spy(""), "boolean_value" }, 
-            { create_spy(""), "number_value" }, 
-            { create_spy(""), "string_value" }, 
-            { create_spy(""), "list_value" }, 
-            { create_spy(""), "nested_table_value" }, 
-            { create_spy(""), "list_value[3]" }, 
-            { create_spy(""), "list_value[4]" }, 
-            { create_spy(""), "nested_table_value.new_stub_value" }, 
-            { create_spy(""), "nested_table_value.new_nested_table_value" }, 
-            { create_spy(""), "nested_table_value.new_nested_table_value.new_stub_value" }, 
-            { create_spy(""), "nested_table_value.nested_table_value" }, 
-            { create_spy(""), "nested_table_value.nested_table_value.stub_value" }, 
-
-            { create_spy(""), "boolean_value", "number_value" },
-            { create_spy(""), "string_value", "list_value" },
-            { create_spy(""), "list_value", "list_value[3]", "list_value[4]" },
-            { create_spy(""), "boolean_value", "nested_table_value.new_stub_value" },
-            { create_spy(""), "number_value", "nested_table_value.new_nested_table_value.new_stub_value" },
-        }
+        local map
         
         before_each(function ()
+            map = {
+                { create_spy("1"), "boolean_value" }, 
+                { create_spy("2"), "number_value" }, 
+                { create_spy("3"), "string_value" }, 
+                { create_spy("4"), "list_value" }, 
+                { create_spy("5"), "nested_table_value" }, 
+                { create_spy("6"), "list_value[3]" }, 
+                { create_spy("7"), "list_value[4]" }, 
+                { create_spy("8"), "nested_table_value.new_stub_value" }, 
+                { create_spy("9"), "nested_table_value.new_nested_table_value" }, 
+                { create_spy("10"), "nested_table_value.new_nested_table_value.new_stub_value" }, 
+                { create_spy("11"), "nested_table_value.nested_table_value" }, 
+                { create_spy("12"), "nested_table_value.nested_table_value.stub_value" }, 
+    
+                { create_spy("13"), "boolean_value", "number_value" },
+                { create_spy("14"), "string_value", "list_value" },
+                { create_spy("15"), "list_value", "list_value[3]", "list_value[4]" },
+                { create_spy("16"), "boolean_value", "nested_table_value.new_stub_value" },
+                { create_spy("17"), "number_value", "nested_table_value.new_nested_table_value.new_stub_value" },
+            }
+            
             traceable.commit(data)
             for k, v in pairs(modified_fields) do
                 data[k] = v
@@ -322,6 +324,43 @@ describe("basic tests -", function()
                 local args = {match.is_ref(data), unpack(v, 2)}
                 for i = 2, #args do
                     local arg = traceable.compile_property(args[i])(data)
+                    if type(arg) == "table" then
+                        arg = match.is_ref(arg)
+                    end
+                    args[i] = arg
+                end
+                assert.spy(action).was_called()
+                assert.spy(action).was_called_with(unpack(args))
+            end
+        end)
+
+        test("mapping on whole data", function ()
+            traceable.map(data, traceable.compile_map(map))
+
+            for i, v in ipairs(map) do
+                local action = v[1]
+                local args = {match.is_ref(data), unpack(v, 2)}
+                for i = 2, #args do
+                    local arg = traceable.compile_property(args[i])(data)
+                    if type(arg) == "table" then
+                        arg = match.is_ref(arg)
+                    end
+                    args[i] = arg
+                end
+                assert.spy(action).was_called()
+                assert.spy(action).was_called_with(unpack(args))
+            end
+        end)
+
+        test("mapping on diff", function ()
+            local keys, newestversion, lastversion = traceable.diff(data, {}, {})
+            traceable.map(newestversion, traceable.compile_map(map))
+
+            for i, v in ipairs(map) do
+                local action = v[1]
+                local args = {match.is_ref(newestversion), unpack(v, 2)}
+                for i = 2, #args do
+                    local arg = traceable.compile_property(args[i])(newestversion)
                     if type(arg) == "table" then
                         arg = match.is_ref(arg)
                     end
