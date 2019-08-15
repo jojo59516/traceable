@@ -117,6 +117,7 @@ describe("basic tests -", function()
         }
 
         before_each(function ()
+            traceable.commit(data)
             for k, v in pairs(new_fields) do
                 data[k] = v
             end
@@ -131,18 +132,34 @@ describe("basic tests -", function()
             end
         end)
 
+        it("should not have removed fields before commit", function ()
+            for k in pairs(removed_fields) do
+                assert.is_nil(data[k])
+            end
+        end)
+
+        test("diff", function ()
+            local keys, newestversion, lastversion = traceable.diff(data, {}, {})
+            
+            for k, v in pairs(new_fields) do
+                assert.is_truthy(keys[k])
+                keys[k] = nil
+                assert.are.same(v, dump(newestversion[k]))
+            end
+            
+            for k in pairs(removed_fields) do
+                assert.is_truthy(keys[k])
+                keys[k] = nil
+                assert.are.same(raw_data[k], dump(lastversion[k]))
+            end
+
+            assert.are.same({}, keys)
+        end)
+
         it("should have new fields after commit", function ()
             traceable.commit(data)
             for k, v in pairs(new_fields) do
                 assert.are.same(v, dump(data[k]))
-            end
-        end)
-
-        pending("diff")
-
-        it("should not have removed fields before commit", function ()
-            for k in pairs(removed_fields) do
-                assert.is_nil(data[k])
             end
         end)
 
@@ -192,7 +209,33 @@ describe("basic tests -", function()
             end
         end)
 
-        pending("diff")
+        test("diff", function ()
+            local keys, newestversion, lastversion = traceable.diff(data, {}, {})
+            
+            -- special cases
+            -- list_value[1] is not changed, so it will not exist in diff results
+            assert.is_nil(keys.list_value[1])
+            newestversion.list_value[1] = data.list_value[1]
+            lastversion.list_value[1] = data.list_value[1]
+
+            -- list_value[2] is not changed, so it will not exist in diff results
+            assert.is_nil(keys.list_value[2])
+            newestversion.list_value[2] = data.list_value[2]
+            lastversion.list_value[2] = data.list_value[2]
+
+            -- data.nested_table_value.new_nested_table_value is a new table value with contents,
+            -- so keys.nested_table_value.new_nested_table_value.new_stub_value will be true and
+            -- lastversion.keys.nested_table_value.new_nested_table_value will be a table with nothing (contents are all nil)
+            assert.is_truthy(keys.nested_table_value.new_nested_table_value.new_stub_value)
+            assert.are.same({}, lastversion.nested_table_value.new_nested_table_value)
+            lastversion.nested_table_value.new_nested_table_value = nil
+
+            for k, v in pairs(modified_fields) do
+                assert.is_truthy(keys[k])
+                assert.are.same(v, dump(newestversion[k]))
+                assert.are.same(raw_data[k], dump(lastversion[k]))
+            end
+        end)
 
         it("should be modified as expected after commit", function ()
             traceable.commit(data)
@@ -218,6 +261,33 @@ describe("basic tests -", function()
                 }, 
             },
         }
+
+        local function create_spy(name)
+            return spy.new(function (t, ...)
+                -- print(name, t, ...)
+            end)
+        end
+
+        local map = {
+            { create_spy(""), "boolean_value" }, 
+            { create_spy(""), "number_value" }, 
+            { create_spy(""), "string_value" }, 
+            { create_spy(""), "list_value" }, 
+            { create_spy(""), "nested_table_value" }, 
+            { create_spy(""), "list_value[3]" }, 
+            { create_spy(""), "list_value[4]" }, 
+            { create_spy(""), "nested_table_value.new_stub_value" }, 
+            { create_spy(""), "nested_table_value.new_nested_table_value" }, 
+            { create_spy(""), "nested_table_value.new_nested_table_value.new_stub_value" }, 
+            { create_spy(""), "nested_table_value.nested_table_value" }, 
+            { create_spy(""), "nested_table_value.nested_table_value.stub_value" }, 
+
+            { create_spy(""), "boolean_value", "number_value" },
+            { create_spy(""), "string_value", "list_value" },
+            { create_spy(""), "list_value", "list_value[3]", "list_value[4]" },
+            { create_spy(""), "boolean_value", "nested_table_value.new_stub_value" },
+            { create_spy(""), "number_value", "nested_table_value.new_nested_table_value.new_stub_value" },
+        }
         
         before_each(function ()
             traceable.commit(data)
@@ -226,49 +296,7 @@ describe("basic tests -", function()
             end
         end)
 
-        local function clone(src, level)
-            if level == 0 then
-                return src
-            end
-
-            local dst = {}
-            for k, v in pairs(src) do
-                if type(v) == "table" then
-                    dst[k] = clone(v, level - 1)
-                else
-                    dst[k] = v
-                end
-            end
-            return dst
-        end
-
-        local function create_spy(name)
-            return spy.new(function (t, ...)
-                -- print(name, t, ...)
-            end)
-        end
-
         test("commit with mapping", function ()
-            local map = {
-                { create_spy(""), "boolean_value" }, 
-                { create_spy(""), "number_value" }, 
-                { create_spy(""), "string_value" }, 
-                { create_spy(""), "list_value" }, 
-                { create_spy(""), "nested_table_value" }, 
-                { create_spy(""), "list_value[3]" }, 
-                { create_spy(""), "list_value[4]" }, 
-                { create_spy(""), "nested_table_value.new_stub_value" }, 
-                { create_spy(""), "nested_table_value.new_nested_table_value" }, 
-                { create_spy(""), "nested_table_value.new_nested_table_value.new_stub_value" }, 
-                { create_spy(""), "nested_table_value.nested_table_value" }, 
-                { create_spy(""), "nested_table_value.nested_table_value.stub_value" }, 
-
-                { create_spy(""), "boolean_value", "number_value" },
-                { create_spy(""), "string_value", "list_value" },
-                { create_spy(""), "list_value", "list_value[3]", "list_value[4]" },
-                { create_spy(""), "boolean_value", "nested_table_value.new_stub_value" },
-                { create_spy(""), "number_value", "nested_table_value.new_nested_table_value.new_stub_value" },
-            }
             traceable.commit(data, traceable.compile_map(map))
 
             for i, v in ipairs(map) do
@@ -281,7 +309,24 @@ describe("basic tests -", function()
                     end
                     args[i] = arg
                 end
-                -- print(action.target_key, unpack(args))
+                assert.spy(action).was_called()
+                assert.spy(action).was_called_with(unpack(args))
+            end
+        end)
+
+        test("diff with mapping", function ()
+            traceable.diff(data, traceable.compile_map(map))
+
+            for i, v in ipairs(map) do
+                local action = v[1]
+                local args = {match.is_ref(data), unpack(v, 2)}
+                for i = 2, #args do
+                    local arg = traceable.compile_property(args[i])(data)
+                    if type(arg) == "table" then
+                        arg = match.is_ref(arg)
+                    end
+                    args[i] = arg
+                end
                 assert.spy(action).was_called()
                 assert.spy(action).was_called_with(unpack(args))
             end
