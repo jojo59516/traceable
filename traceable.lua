@@ -307,19 +307,21 @@ function _M.commit(t, map)
 end
 
 local function do_maps(t, sub, map, mapped)
-    for k, v in pairs(map) do
-        if k == k_stub then
-            if v then
-                do_map(t, v, mapped) 
-            end
-        else
-            do_maps(t, t[k], v, mapped)
+    for k, map_k in pairs(map) do
+        local stub = map_k[k_stub]
+        if stub then
+            do_map(t, stub, mapped) 
+        end
+        
+        local v = sub[k]
+        if type(v) == "table" then
+            do_maps(t, v, map_k, mapped)
         end
     end
 end
 
 function _M.map(t, map)
-    do_maps(t, t, map, {})
+    do_maps(t, t, map, map and {})
 end
 
 local function forward_to(field, func)
