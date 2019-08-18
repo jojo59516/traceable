@@ -1,11 +1,10 @@
+local next = next
+
 local traceable = {}
 local _M = traceable
 
-local null = setmetatable({}, { __tostring = function () return "null"end })
-_M.null = null
-
 local function merge(dst, src)
-    for k, v in pairs(src) do
+    for k, v in next, src do
         dst[k] = v
     end
     return dst
@@ -57,8 +56,12 @@ local set
 local function create()
     local o = {
         dirty = false, 
+        ignored = false, 
+        opaque = false, 
+
         _stage = {},
-        _trace = {},
+        _traced = {},
+        _lastversion = {},
         _parent = false, 
     }
     return setmetatable(o, {
@@ -78,12 +81,12 @@ local function mark_dirty(t)
     end
 end
 
-set = function (t, k, v)
+set = function (t, k, v, force)
     local stage = t._stage
     local u = stage[k]
     if _M.is_traceable(v) then
         if _M.is(u) then
-            for k in pairs(u._stage) do
+            for k in next, u._stage do
                 if v[k] == nil then
                     u[k] = nil
                 end
@@ -95,12 +98,16 @@ set = function (t, k, v)
         end
         merge(u, v)
     else
-        local trace = t._trace
-        if trace[k] == nil then
-            trace[k] = u == nil and null or u
+        local traced = t._traced
+        local lastverison = t._lastversion
+        if stage[k] ~= v or force then
+            if not traced[k] then
+                traced[k] = true
+                lastverison[k] = u
+            end
+            stage[k] = v
+            mark_dirty(t)
         end
-        stage[k] = v
-        mark_dirty(t)
     end
 end
 
@@ -116,7 +123,6 @@ function _M.is_traceable(t)
     local mt = getmetatable(t)
     return mt == nil or mt.__newindex == set
 end
-assert(not _M.is_traceable(_M.null))
 
 function _M.new(t)
     local o = create()
@@ -124,6 +130,26 @@ function _M.new(t)
         merge(o, t)
     end
     return o
+end
+
+function _M.mark_changed(t, k)
+    local v = t[k]
+    if _M.is(v) then
+        mark_dirty(v)
+    else
+        set(t, k, v, true)
+    end
+end
+
+function _M.set_ignored(t, ignored)
+    t.ignored = ignored
+    if not ignored and t.dirty then
+        mark_dirty(t._parent)
+    end
+end
+
+function _M.set_opaque(t, opaque)
+    t.opaque = opaque
 end
 
 local k_stub = setmetatable({}, { __tostring = function () return "k_stub" end })
@@ -172,8 +198,7 @@ local function do_map(t, mappings, mapped)
         local mapping = mappings[i]
         if not mapped[mapping] then
             mapped[mapping] = true
-            local argc = mapping[1]        
-            local argv = argv
+            local argc = mapping[1]
             argv[1] = t
             for i = 2, argc do
                 argv[i] = mapping[i + 1](t)
@@ -185,32 +210,43 @@ local function do_map(t, mappings, mapped)
     end
 end
 
-local function diff(t, sub, newestversion, lastversion, map, mapped)
+local function next_traced(t, k)
+    local k = next(t._traced, k)
+    return k, t._stage[k], t._lastversion[k]
+end
+
+local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
     if not sub.dirty then
-        return 
+        return false
     end
 
-    local stage = sub._stage
-    local trace = sub._trace
-
-    local changed = false
-    local keys = {}
-    for k, u in pairs(trace) do
-        local v = stage[k]
-        if u == null then
-            u = nil
-        end
-        if u ~= v then
-            changed = true
-            keys[k] = true
-            if newestversion then
-                newestversion[k] = v
+    local has_changed = next(sub._traced) ~= nil
+    for k, v in next, sub._stage do
+        if _M.is(v) and not v.ignored then
+            if v.opaque then
+                has_changed = diff(t, v)
+                if has_changed then
+                    if changed then
+                        changed[k] = true
+                    end
+                end
+            else
+                local c, n, l = changed and {}, newestversion and {}, lastversion and {}
+                has_changed = diff(t, v, c, n, l, map and map[k], mapped)
+                if has_changed then
+                    if changed then
+                        changed[k] = c
+                    end
+                    if newestversion then
+                        newestversion[k] = n
+                    end                
+                    if lastversion then
+                        lastversion[k] = l
+                    end
+                end
             end
-            if lastversion then
-                lastversion[k] = u
-            end
 
-            if map then
+            if has_changed and map then
                 local stub = get_map_stub(map, k)
                 if stub then
                     do_map(t, stub, mapped)
@@ -218,65 +254,56 @@ local function diff(t, sub, newestversion, lastversion, map, mapped)
             end
         end
     end
-    for k, v in pairs(stage) do
-        if _M.is(v) then
-            local d, n, l = diff(t, v, 
-                newestversion and {}, lastversion and {}, 
-                map and map[k], mapped)
-            if d then
-                changed = true
-                keys[k] = d
-                if newestversion then
-                    newestversion[k] = n
-                end                
-                if lastversion then
-                    lastversion[k] = l
-                end
 
-                if map then
-                    local stub = get_map_stub(map, k)
-                    if stub then
-                        do_map(t, stub, mapped)
-                    end
-                end
+    for k, v, u in next_traced, sub do
+        if changed then
+            changed[k] = true
+        end
+
+        if newestversion then
+            newestversion[k] = v
+        end
+        if lastversion then
+            lastversion[k] = u
+        end
+
+        if map then
+            local stub = get_map_stub(map, k)
+            if stub then
+                do_map(t, stub, mapped)
             end
         end
     end
 
-    if not changed then
-        return 
-    end
-    return keys, newestversion, lastversion
+    return has_changed, changed, newestversion, lastversion
 end
 
-function _M.diff(t, newestversion, lastversion, map)
-    if newestversion and lastversion == nil and map == nil then
-        newestversion, lastversion, map = nil, nil, newestversion
+function _M.diff(t, changed, newestversion, lastversion, map)
+    if changed ~= nil and newestversion == nil and lastversion == nil and map == nil then
+        changed, newestversion, lastversion, map = nil, nil, nil, changed
     end
     
-    local keys = diff(t, t, newestversion, lastversion, map, map and {}) or {}
-    return keys, newestversion, lastversion
+    local has_changed = diff(t, t, changed, newestversion, lastversion, map, map and {})
+    return has_changed, changed, newestversion, lastversion
 end
 
 local function commit(t, sub, map, mapped)
     if not sub.dirty then
         return false
     end
+    
+    local traced = sub._traced
+    local lastverison = sub._lastversion
 
-    local stage = sub._stage
-    local trace = sub._trace
-
-    local committed = false
-    for k, u in pairs(trace) do
-        local v = stage[k]
-        if u == null then
-            u = nil
-        end
-        if u ~= v then
-            trace[k] = nil
-            committed = true
-            
-            if map then
+    local committed = next(traced) ~= nil
+    for k, v in next, sub._stage do
+        if _M.is(v) and not v.ignored then
+            if v.opaque then
+                committed = commit(t, v)
+            else
+                committed = commit(t, v, map and map[k], mapped)
+            end
+            if committed and map then
                 local stub = get_map_stub(map, k)
                 if stub then
                     do_map(t, stub, mapped)
@@ -284,20 +311,19 @@ local function commit(t, sub, map, mapped)
             end
         end
     end
-    for k, v in pairs(stage) do
-        if _M.is(v) then
-            if commit(t, v, map and map[k], mapped) then
-                committed = true
 
-                if map then
-                    local stub = get_map_stub(map, k)
-                    if stub then
-                        do_map(t, stub, mapped)
-                    end
-                end
+    for k in next, traced do
+        traced[k] = nil
+        lastverison[k] = nil
+        
+        if map then
+            local stub = get_map_stub(map, k)
+            if stub then
+                do_map(t, stub, mapped)
             end
         end
     end
+
     sub.dirty = false
     return committed
 end
@@ -307,7 +333,7 @@ function _M.commit(t, map)
 end
 
 local function do_maps(t, sub, map, mapped)
-    for k, map_k in pairs(map) do
+    for k, map_k in next, map do
         local stub = map_k[k_stub]
         if stub then
             do_map(t, stub, mapped) 
