@@ -156,7 +156,8 @@ describe("basic tests -", function()
         end)
 
         test("diff", function ()
-            local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
+            local has_changed, diff = traceable.diff(data, "kvu")
+            local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
 
             assert.is_truthy(has_changed)
             
@@ -238,7 +239,8 @@ describe("basic tests -", function()
 
         describe("test diff -", function ()
             test("diff", function ()
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
+                local has_changed, diff = traceable.diff(data, "kvu")
+                local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
     
                 assert.is_truthy(has_changed)
                 
@@ -268,30 +270,40 @@ describe("basic tests -", function()
             end)
     
             test("set_ignored", function ()
-                -- ignore
-                traceable.set_ignored(data.nested_table_value, true)
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
-                assert.is_nil(changed.nested_table_value)
+                do
+                    traceable.set_ignored(data.nested_table_value, true)
+                    local has_changed, diff = traceable.diff(data, "kvu")
+                    local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
+                    assert.is_nil(changed.nested_table_value)
+                end
 
-                -- cancel ignore
-                traceable.set_ignored(data.nested_table_value, false)
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
-                assert.is_truthy(changed.nested_table_value.new_nested_table_value.new_stub_value)
-                assert.are.same(modified_fields.nested_table_value, dump(newestversion.nested_table_value))
+                do
+                    traceable.set_ignored(data.nested_table_value, false)
+                    local has_changed, diff = traceable.diff(data, "kvu")
+                    local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
+                    assert.is_truthy(changed.nested_table_value.new_nested_table_value.new_stub_value)
+                    assert.are.same(modified_fields.nested_table_value, dump(newestversion.nested_table_value))
+                end
             end)
     
             test("set_opaque", function ()
-                traceable.set_opaque(data.nested_table_value, true)
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
-                assert.is_truthy(changed.nested_table_value)
-                assert.is_nil(newestversion.nested_table_value)
-                assert.is_nil(lastversion.nested_table_value)
+                do
+                    traceable.set_opaque(data.nested_table_value, true)
+                    local has_changed, diff = traceable.diff(data, "kvu")
+                    local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
+                    assert.is_truthy(changed.nested_table_value)
+                    assert.is_nil(newestversion.nested_table_value)
+                    assert.is_nil(lastversion.nested_table_value)
+                end
 
-                traceable.set_opaque(data.nested_table_value, false)
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
-                assert.is_truthy(changed.nested_table_value)
-                assert.is_truthy(newestversion.nested_table_value)
-                assert.is_truthy(lastversion.nested_table_value)
+                do
+                    traceable.set_opaque(data.nested_table_value, false)
+                    local has_changed, diff = traceable.diff(data, "kvu")
+                    local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
+                    assert.is_truthy(changed.nested_table_value)
+                    assert.is_truthy(newestversion.nested_table_value)
+                    assert.is_truthy(lastversion.nested_table_value)
+                end
             end)
     
             test("mark_changed", function ()
@@ -300,7 +312,8 @@ describe("basic tests -", function()
                 traceable.mark_changed(data, "object_value")
                 assert.is_truthy(data.dirty)
 
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
+                local has_changed, diff = traceable.diff(data, "kvu")
+                local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
                 assert.are.same({object_value = true}, changed)
                 assert.are.same({object_value = modified_fields.object_value}, newestversion)
                 assert.are.same({object_value = modified_fields.object_value}, lastversion)
@@ -395,7 +408,10 @@ describe("basic tests -", function()
             end)
     
             test("mapping on diff", function ()
-                local has_changed, changed, newestversion, lastversion = traceable.diff(data, {}, {}, {})
+                local has_changed, diff = traceable.diff(data, "v")
+                local changed, newestversion, lastversion = diff.changed, diff.newestversion, diff.lastversion
+                assert.is_nil(changed)
+                assert.is_nil(lastversion)
                 traceable.map(newestversion, traceable.compile_map(map))
     
                 for i, v in ipairs(map) do

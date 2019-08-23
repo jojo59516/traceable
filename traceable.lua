@@ -215,16 +215,19 @@ local function next_traced(t, k)
     return k, t._stage[k], t._lastversion[k]
 end
 
-local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
+local function _commit(keep_dirty, t, sub, changed, newestversion, lastversion, map, mapped)
     if not sub.dirty then
         return false
     end
+    
+    local traced = sub._traced
+    local trace = sub._lastversion
 
-    local has_changed = next(sub._traced) ~= nil
+    local has_changed = next(traced) ~= nil
     for k, v in next, sub._stage do
         if _M.is(v) and not v.ignored then
             if v.opaque then
-                has_changed = diff(t, v)
+                has_changed = _commit(keep_dirty, t, v)
                 if has_changed then
                     if changed then
                         changed[k] = true
@@ -232,7 +235,7 @@ local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
                 end
             else
                 local c, n, l = changed and {}, newestversion and {}, lastversion and {}
-                has_changed = diff(t, v, c, n, l, map and map[k], mapped)
+                has_changed = _commit(keep_dirty, t, v, c, n, l, map and map[k], mapped)
                 if has_changed then
                     if changed then
                         changed[k] = c
@@ -245,7 +248,6 @@ local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
                     end
                 end
             end
-
             if has_changed and map then
                 local stub = get_map_stub(map, k)
                 if stub then
@@ -256,6 +258,11 @@ local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
     end
 
     for k, v, u in next_traced, sub do
+        if not keep_dirty then
+            traced[k] = nil
+            trace[k] = nil
+        end
+
         if changed then
             changed[k] = true
         end
@@ -266,55 +273,6 @@ local function diff(t, sub, changed, newestversion, lastversion, map, mapped)
         if lastversion then
             lastversion[k] = u
         end
-
-        if map then
-            local stub = get_map_stub(map, k)
-            if stub then
-                do_map(t, stub, mapped)
-            end
-        end
-    end
-
-    return has_changed, changed, newestversion, lastversion
-end
-
-function _M.diff(t, changed, newestversion, lastversion, map)
-    if changed ~= nil and newestversion == nil and lastversion == nil and map == nil then
-        changed, newestversion, lastversion, map = nil, nil, nil, changed
-    end
-    
-    local has_changed = diff(t, t, changed, newestversion, lastversion, map, map and {})
-    return has_changed, changed, newestversion, lastversion
-end
-
-local function commit(t, sub, map, mapped)
-    if not sub.dirty then
-        return false
-    end
-    
-    local traced = sub._traced
-    local lastverison = sub._lastversion
-
-    local committed = next(traced) ~= nil
-    for k, v in next, sub._stage do
-        if _M.is(v) and not v.ignored then
-            if v.opaque then
-                committed = commit(t, v)
-            else
-                committed = commit(t, v, map and map[k], mapped)
-            end
-            if committed and map then
-                local stub = get_map_stub(map, k)
-                if stub then
-                    do_map(t, stub, mapped)
-                end
-            end
-        end
-    end
-
-    for k in next, traced do
-        traced[k] = nil
-        lastverison[k] = nil
         
         if map then
             local stub = get_map_stub(map, k)
@@ -324,12 +282,52 @@ local function commit(t, sub, map, mapped)
         end
     end
 
-    sub.dirty = false
-    return committed
+    if not keep_dirty then
+        sub.dirty = false
+    end
+    return has_changed
 end
 
-function _M.commit(t, map)
-    commit(t, t, map, map and {})
+local flag_map = {
+    [("k"):byte()] = "changed", 
+    [("v"):byte()] = "newestversion", 
+    [("u"):byte()] = "lastversion", 
+}
+local function commit(t, map, diff_flags, keep_dirty)
+    local has_changed, diff
+    if diff_flags then
+        diff = {}
+        for i = 1, #diff_flags do
+            local field_name = flag_map[diff_flags:byte(i)]
+            if field_name then
+                diff[field_name] = {}
+            end
+        end
+        has_changed = _commit(keep_dirty, 
+            t, t, 
+            diff.changed, diff.newestversion, diff.lastversion, 
+            map, map and {})
+    else
+        has_changed = _commit(keep_dirty, 
+            t, t, 
+            nil, nil, nil, 
+            map, map and {})
+    end
+    return has_changed, diff
+end
+
+function _M.commit(t, map, diff_flags)
+    if type(map) == "string" then
+        map, diff_flags = nil, map
+    end
+    return commit(t, map, diff_flags, false)
+end
+
+function _M.diff(t, map, diff_flags)
+    if type(map) == "string" then
+        map, diff_flags = nil, map
+    end
+    return commit(t, map, diff_flags, true)
 end
 
 local function do_maps(t, sub, map, mapped)
